@@ -22,7 +22,7 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI
                 // Set the strings to validate against. (Scopes, which should be 
                 // simply "access_as_user" in this sample, is validated inside the controller.)
                 ValidAudience = ConfigurationManager.AppSettings["ida:Audience"],
-                ValidIssuer = ConfigurationManager.AppSettings["ida:Issuer"],
+                ValidIssuers = new string[] { ConfigurationManager.AppSettings["ida:Issuer1"], ConfigurationManager.AppSettings["ida:Issuer2"], ConfigurationManager.AppSettings["ida:Issuer3"], ConfigurationManager.AppSettings["ida:Issuer4"] },
 
                 // Save the raw token recieved from the Office host, so it can be 
                 // used in the "on behalf of" flow.

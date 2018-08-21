@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Web.Http;
 using Office_Add_in_ASPNET_SSO_WebAPI.Helpers;
 using Office_Add_in_ASPNET_SSO_WebAPI.Models;
+using System.Web.Script.Serialization;
 using System;
 using System.Net;
 using System.Net.Http;
@@ -26,6 +27,8 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Controllers
         // GET api/values
         public async Task<HttpResponseMessage> Get()
         {
+            Dictionary<string, string> errorObj = new Dictionary<string, string>();
+
             // OWIN middleware validated the audience and issuer, but the scope must also be validated; must contain "access_as_user".
             string[] addinScopes = ClaimsPrincipal.Current.FindFirst("http://schemas.microsoft.com/identity/claims/scope").Value.Split(' ');
             if (addinScopes.Contains("access_as_user"))
@@ -33,66 +36,30 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Controllers
                 // Get the raw token that the add-in page received from the Office host.
                 var bootstrapContext = ClaimsPrincipal.Current.Identities.First().BootstrapContext
                     as BootstrapContext;
-                UserAssertion userAssertion = new UserAssertion(bootstrapContext.Token);
 
                 // Get the access token for MS Graph. 
-                ClientCredential clientCred = new ClientCredential(ConfigurationManager.AppSettings["ida:Password"]);
-                ConfidentialClientApplication cca =
-                    new ConfidentialClientApplication(ConfigurationManager.AppSettings["ida:ClientID"],
-                                                      "https://localhost:44355", clientCred, null, null);
-                string[] graphScopes = { "Files.Read.All" };                
-                AuthenticationResult result = null;
+                string[] graphScopes = { "Files.Read.All" };
+
+                GraphToken result = null;
                 try
                 {
-                    // The AcquireTokenOnBehalfOfAsync method will first look in the MSAL in memory cache for a
-                    // matching access token. Only if there isn't one, does it initiate the "on behalf of" flow
+                    // The AcquireTokenOnBehalfOfAsync method will initiate the "on behalf of" flow
                     // with the Azure AD V2 endpoint.
-                    result = await cca.AcquireTokenOnBehalfOfAsync(graphScopes, userAssertion, "https://login.microsoftonline.com/common/oauth2/v2.0");
+                    result = await GraphApiHelper.AcquireTokenOnBehalfOfAsync(bootstrapContext.Token, graphScopes);
                 }
-                catch (MsalServiceException e)
+                catch (GraphTokenException e)
                 {
-                    // If multi-factor authentication is required by the MS Graph resource and the user 
-                    // has not yet provided it, AAD will return "400 Bad Request" with error AADSTS50076 
-                    // and a Claims property. MSAL throws a MsalUiRequiredException (which inherits 
-                    // from MsalServiceException) with this information. The Claims property value must 
-                    // be passed to the client which should pass it to the Office host, which then 
-                    // includes it in a request for a new token. AAD will prompt the user for all 
-                    // required forms of authentication.
-                    if (e.Message.StartsWith("AADSTS50076")) {
-
-                        // The APIs that create HTTP Responses from exceptions don't know about the 
-                        // Claims property, so they don't include it. We have to manually create a message
-                        // that includes it. A custom Message property, however, blocks the creation of an 
-                        // ExceptionMessage property, so the only way to get the error AADSTS50076 to the 
-                        // client is to add it to the custom Message. JavaScript in the client will need 
-                        // to discover if a response has a Message or ExceptionMessage, so it knows which 
-                        // to read. 
-                        string responseMessage = String.Format("{{\"AADError\":\"AADSTS50076\",\"Claims\":{0}}}", e.Claims);
-                        return SendErrorToClient(HttpStatusCode.Forbidden, null, responseMessage);
-                    }
-
-                    // If the call to AAD contained at least one scope (permission) for which neither 
-                    // the user nor a tenant administrator has consented (or consent was revoked. 
-                    // AAD will return "400 Bad Request" with error AADSTS65001. MSAL throws a 
-                    // MsalUiRequiredException with this information. The client should re-call 
-                    // getAccessTokenAsync with the option { forceConsent: true }.
-                    if ((e.Message.StartsWith("AADSTS65001"))
-
-                    // If the call to AAD contained at least one scope that AAD does not recognize,
-                    // AAD returns "400 Bad Request" with error AADSTS70011. MSAL throws a 
-                    // MsalUiRequiredException (which inherites from MsalServiceException) with this 
-                    // information. Tthe client should inform the user.
-                    || (e.Message.StartsWith("AADSTS70011: The provided value for the input parameter 'scope' is not valid.")))
-                    {
-                        return SendErrorToClient(HttpStatusCode.Forbidden, e, null);
-                    }
-                    else
-                    {
-                        // Rethrowing the MsalServiceException will not relay the original 
-                        // "400 Bad Request" exception to the client. Instead a "500 Server Error"
-                        // is sent.
-                        throw e;
-                    }                    
+                    errorObj["claims"] = e.Claims;
+                    errorObj["message"] = e.Message;
+                    errorObj["errorCode"] = e.ErrorCode;
+                    errorObj["suberror"] = e.SubError;
+                    return SendErrorToClient(HttpStatusCode.Unauthorized, errorObj);
+                }
+                catch (Exception e)
+                {
+                    errorObj["errorCode"] = "unknown_error";
+                    errorObj["message"] = e.Message;
+                    return SendErrorToClient(HttpStatusCode.InternalServerError, errorObj);
                 }
 
                 // Get the names of files and folders in OneDrive for Business by using the Microsoft Graph API. Select only properties needed.
@@ -111,7 +78,9 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Controllers
                 // re-calling getAccessTokenAsync. 
                 catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException e)
                 {
-                    return SendErrorToClient(HttpStatusCode.Unauthorized, e, null);                    
+                    errorObj["errorCode"] = "invalid_graph_token";
+                    errorObj["message"] = e.Message;
+                    return SendErrorToClient(HttpStatusCode.Unauthorized, errorObj);
                 }
 
                 // The returned JSON includes OData metadata and eTags that the add-in does not use. 
@@ -124,27 +93,25 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Controllers
 
                 var requestMessage = new HttpRequestMessage();
                 requestMessage.SetConfiguration(new HttpConfiguration());
-                var response = requestMessage.CreateResponse<List<string>>(HttpStatusCode.OK, itemNames); 
+                var response = requestMessage.CreateResponse<List<string>>(HttpStatusCode.OK, itemNames);
                 return response;
-            }
-            // The token from the client does not have "access_as_user" permission.
-            return SendErrorToClient(HttpStatusCode.Unauthorized, null, "Missing access_as_user.");
-        }
 
-        private HttpResponseMessage SendErrorToClient(HttpStatusCode statusCode, Exception e, string message)
-        {
-            HttpError error;
-
-            if (e != null)
-            {
-                error = new HttpError(e, true);
             }
             else
             {
-                error = new HttpError(message);
+                // The token from the client does not have "access_as_user" permission.
+                errorObj["errorCode"] = "invalid_access_token";
+                errorObj["message"] = "Missing access_as_user. Microsoft Office does not have permission to get Microsoft Graph data on behalf of the current user.";
+                return SendErrorToClient(HttpStatusCode.Unauthorized, errorObj);
             }
+
+        }
+
+        private HttpResponseMessage SendErrorToClient(HttpStatusCode statusCode, Dictionary<string, string> message)
+        {
             var requestMessage = new HttpRequestMessage();
-            var errorMessage = requestMessage.CreateErrorResponse(statusCode, error);
+            requestMessage.SetConfiguration(new HttpConfiguration());
+            HttpResponseMessage errorMessage = requestMessage.CreateResponse(statusCode, message);
 
             return errorMessage;
         }

@@ -27,7 +27,7 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Helpers
         /// <returns>Collection of T items that the caller can cast to any IEnumerable type.</returns>
         internal static async Task<IEnumerable<T>> GetItems<T>(string itemsUrl, string accessToken)
         {
-            dynamic jsonData = await SendRequestWithAccessToken(itemsUrl, accessToken);
+            dynamic jsonData = await SendRequestWithAccessTokenAsync(itemsUrl, accessToken);
 
             // Convert to .NET class and populate the properties of the model objects,
             // and then populate the IEnumerable object and return it.
@@ -41,7 +41,7 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Helpers
         /// <param name="itemsUrl">The OData endpoint URL.</param>
         /// <param name="accessToken">The access token for the endpoint resource.</param>
         /// <returns></returns>
-        internal static async Task<dynamic> SendRequestWithAccessToken(string itemsUrl, string accessToken)
+        internal static async Task<dynamic> SendRequestWithAccessTokenAsync(string itemsUrl, string accessToken)
         {
             dynamic jsonData = null;
 
