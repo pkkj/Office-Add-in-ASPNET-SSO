@@ -123,10 +123,8 @@ function handleClientSideErrors(result) {
             // Unspecified error in the Office host.
             showResult(['Please save your work, sign out of Office, close all Office applications, and restart this Office application.']);
             break;
-
         case 13007:
             // The Office host cannot get an access token to the add-ins web service/application.
-            // Developer may try to prompt the consent dialog one time.
             showResult(['That operation cannot be done at this time. Please try again later.']);
             break;
         case 13008:
