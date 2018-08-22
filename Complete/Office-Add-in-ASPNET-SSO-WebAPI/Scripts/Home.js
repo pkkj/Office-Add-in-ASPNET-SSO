@@ -36,6 +36,7 @@ Office.initialize = function (reason) {
 
 // Main function to do everything
 function getOneDriveFiles() {
+    // Reset all the variables
     retryOnServerMissingConsent = 0;
     timesGetOneDriveFilesHasRun++;
     unsupportConsentDialog = false;
@@ -125,6 +126,7 @@ function handleClientSideErrors(result) {
 
         case 13007:
             // The Office host cannot get an access token to the add-ins web service/application.
+            // Developer may try to prompt the consent dialog one time.
             showResult(['That operation cannot be done at this time. Please try again later.']);
             break;
         case 13008:
@@ -153,6 +155,7 @@ function handleServerSideErrors(error) {
         var response = JSON.parse(error.responseText);
         var errorCode = response["errorCode"];
 
+        // This indicates that the server fail to do the on-behalf-of flow because of MFA or permission problem.
         if (errorCode == "invalid_grant") {
             // For OrgID, claim string will be returned in all cases. Need to check the suberror for more info.
             if (response["claims"] != null && response["suberror"] != null && response["suberror"] == "basic_action") {

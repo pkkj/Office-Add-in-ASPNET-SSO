@@ -4,7 +4,6 @@
     This file provides controller methods to get data from MS Graph. 
 */
 
-using Microsoft.Identity.Client;
 using System.IdentityModel.Tokens;
 using System.Collections.Generic;
 using System.Configuration;
@@ -45,10 +44,18 @@ namespace Office_Add_in_ASPNET_SSO_WebAPI.Controllers
                 {
                     // The AcquireTokenOnBehalfOfAsync method will initiate the "on behalf of" flow
                     // with the Azure AD V2 endpoint.
-                    result = await GraphApiHelper.AcquireTokenOnBehalfOfAsync(bootstrapContext.Token, graphScopes);
+                    result = await GraphTokenHelper.AcquireTokenOnBehalfOfAsync(bootstrapContext.Token, graphScopes);
                 }
                 catch (GraphTokenException e)
                 {
+                    // Even we have the access token from Office, it's possible the Azure AD fails the request.
+                    // Potential reasons could be: 1) Require MFA, 2) Missing consent
+                    // Why missing consent could happen?
+                    // To get an access token from Office client, user only needs to grant the "access_as_user" scope.
+                    // It doesnt mean user has granted all the required scopes.
+                    // If the required scopes have updated (for example, the developer change the scopes in http://apps.dev.microsoft.com/,
+                    // user has to consent again for those new scopes.
+                    // Therefore, the server should send the error to the client and let the client to handle it.
                     errorObj["claims"] = e.Claims;
                     errorObj["message"] = e.Message;
                     errorObj["errorCode"] = e.ErrorCode;
